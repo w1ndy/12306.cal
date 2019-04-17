@@ -1,6 +1,8 @@
 # 12306.cal
 > A simple script that adds your train tickets booked on 12306.cn to Google Calendar
 
+A user script version is available at [here](https://raw.githubusercontent.com/w1ndy/12306.cal/master/12306cal.user.js).
+
 ## Usage
 
 1. Install the requirements (icalendar, pytz, requests) with ``pip3 install -r requirements.txt``
