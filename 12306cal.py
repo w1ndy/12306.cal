@@ -2,8 +2,11 @@ import re
 import requests
 import pytz
 import sys
+import webbrowser
 
 from datetime import datetime
+from optparse import OptionParser
+from urllib.parse import quote
 from icalendar import Calendar, Event, vText
 
 def getStations():
@@ -54,21 +57,26 @@ def findTrain(beginStations, endStations, date, trainID):
                 return result
     return None
 
-def printUsage():
-    print('Usage: python3 12306ics.py begin_station end_station yyyy-mm-dd train_id [seat]')
-    print('Example: python3 12306ics.py 北京 上海 2019-05-01 G1 > 12306.ics')
-    print('         python3 12306ics.py bj sh 2019-05-01 G1 1.1A > 12306.ics')
-    exit(1)
+def buildOptionParser():
+    usage = 'usage: %prog [options] begin_station end_station yyyy-mm-dd train_id'
+    parser = OptionParser(usage=usage)
+    parser.add_option('-s', '--seat', dest='seat', help='specify the booked seat which will be displayed as \'@ SEAT\' after the title of an event', metavar='SEAT')
+    parser.add_option('-x', '--no-browser', dest='noBrowser', help='do not open the browser automatically', action='store_true')
+    parser.add_option('-o', '--ical', dest='icalOutputFile', help='write to an ical file', metavar='FILE')
+    return parser
 
 def main():
-    if len(sys.argv) != 5 and len(sys.argv) != 6:
-        printUsage()
+    parser = buildOptionParser()
+    (opts, args) = parser.parse_args()
+    if len(args) != 4:
+        parser.print_help()
+        exit(1)
 
-    beginStationHint = sys.argv[1]
-    endStationHint = sys.argv[2]
-    date = sys.argv[3]
-    trainID = sys.argv[4]
-    seatID = (' @ ' + sys.argv[5]) if len(sys.argv) == 6 else ''
+    beginStationHint = args[0]
+    endStationHint = args[1]
+    date = args[2]
+    trainID = args[3]
+    seatID = (' @ ' + opts.seat) if opts.seat else ''
 
     stations = getStations()
     beginStations, endStations = searchStations(stations, beginStationHint, endStationHint)
@@ -77,22 +85,35 @@ def main():
     if not info:
         raise RuntimeError('Cannot find the specified train!')
 
-    event = Event()
-    event.add('summary', '%s: %s - %s%s' % (trainID, info['beginStation'], info['endStation'], seatID))
     dateComponents = list(map(int, date.split('-')))
     beginTimeComponents = list(map(int, info['beginTime'].split(':')))
     endTimeComponents = list(map(int, info['endTime'].split(':')))
-    event.add('dtstart', datetime(*dateComponents, *beginTimeComponents, 0, tzinfo=pytz.timezone('Asia/Shanghai')))
-    event.add('dtend', datetime(*dateComponents, *endTimeComponents, 0, tzinfo=pytz.timezone('Asia/Shanghai')))
-    event.add('dtstamp', datetime(*dateComponents, 0, 0, 0, tzinfo=pytz.timezone('Asia/Shanghai')))
-    event['location'] = vText(info['beginStation'])
-    event['uid'] = '12306ICS_%s_%s' % (date, trainID)
+    eventSummary = '%s: %s - %s%s' % (trainID, info['beginStation'], info['endStation'], seatID)
+    eventLocation = info['beginStation'] + '火车站'
+    eventBeginTime = datetime(*dateComponents, *beginTimeComponents, 0, tzinfo=pytz.timezone('Asia/Shanghai'))
+    eventEndTime = datetime(*dateComponents, *endTimeComponents, 0, tzinfo=pytz.timezone('Asia/Shanghai'))
 
-    cal = Calendar()
-    cal.add('prodid', '-//12306ics//')
-    cal.add('version', '2.0')
-    cal.add_component(event)
-    sys.stdout.buffer.write(cal.to_ical())
+    if opts.icalOutputFile:
+        event = Event()
+        event.add('summary', eventSummary)
+        event.add('dtstart', eventBeginTime)
+        event.add('dtend', eventEndTime)
+        event.add('dtstamp', datetime.now(pytz.timezone('Asia/Shanghai')))
+        event['location'] = vText(eventLocation)
+        event['uid'] = '12306CAL_%s_%s' % (date, trainID)
+
+        cal = Calendar()
+        cal.add('prodid', '-//12306cal//')
+        cal.add('version', '2.0')
+        cal.add_component(event)
+
+        with open(opts.icalOutputFile, 'wb') as f:
+            f.write(cal.to_ical())
+    else:
+        url = 'https://www.google.com/calendar/render?action=TEMPLATE&text=%s&location=%s&dates=%s%%2F%s' % (quote(eventSummary), quote(eventLocation), eventBeginTime.astimezone(pytz.utc).strftime('%Y%m%dT%H%M%SZ'), eventEndTime.astimezone(pytz.utc).strftime('%Y%m%dT%H%M%SZ'))
+        print(url)
+        if not opts.noBrowser:
+            webbrowser.open_new_tab(url)
 
 if __name__ == '__main__':
     main()
