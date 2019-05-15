@@ -4,7 +4,7 @@
 // @version      0.1
 // @description  A simple script that adds your train tickets booked on 12306.cn to Google Calendar
 // @author       w1ndy
-// @match        https://kyfw.12306.cn/otn/view/train_order.html
+// @match        https://kyfw.12306.cn/otn/view/train_order.html*
 // @grant        none
 // ==/UserScript==
 
