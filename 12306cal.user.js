@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         12306cal
 // @namespace    http://github.com/w1ndy/12306.cal
-// @version      0.1
+// @version      1.0
 // @description  A simple script that adds your train tickets booked on 12306.cn to Google Calendar
 // @author       w1ndy
-// @match        https://kyfw.12306.cn/otn/view/train_order.html*
+// @match        https://kyfw.12306.cn/otn/view/personal_travel.html
 // @grant        none
 // ==/UserScript==
 
@@ -12,74 +12,49 @@
     'use strict'
 
     function attachButton() {
-        document.querySelectorAll('.has-order-num:not(.item-disabled) .ticket-status-name:not(.cal-injected)')
-        .forEach(el => {
-            el.classList.add('cal-injected')
-            const cancellationLink = el.querySelector('a')
-            if (!cancellationLink) {
+        document.querySelectorAll('.order-item-bd:not(.cal-injected)')
+        .forEach(async el => {
+            const noticePrintBtn = el.querySelector('#notice_print')
+            if (!noticePrintBtn || noticePrintBtn.classList.contains('btn-disabled')) {
                 return
             }
+            el.classList.add('cal-injected')
 
-            const fromStationTelecode = cancellationLink.getAttribute('data-from-station-telecode')
-            const toStationTelecode = cancellationLink.getAttribute('data-to-station-telecode')
-            const train = cancellationLink.getAttribute('data-train-no')
-            const date = cancellationLink.getAttribute('data-train-date').split(' ')[0]
-            const seat = cancellationLink.getAttribute('data-coach-name') + '车' +
-                         cancellationLink.getAttribute('data-seat-name')
+            const ticketId = /\?(.*)/.exec(noticePrintBtn.href)[1]
+            const resp = await fetch('https://kyfw.12306.cn/otn/psr/getItineraryNotice', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: `ext_ticket_no=${ticketId}`
+            })
+            const itinerary = await resp.json()
+
+            const fromStation = itinerary.data.itinerary_notice.psr.from_station_name
+            const toStation = itinerary.data.itinerary_notice.psr.to_station_name
+            const train = itinerary.data.itinerary_notice.psr.board_train_code
+            const date = itinerary.data.itinerary_notice.psr.start_date
+            const startTime = itinerary.data.itinerary_notice.psr.start_time
+            const endTime = itinerary.data.itinerary_notice.psr.arrive_time
+            const startDate = new Date(`${date.slice(0,4)}-${date.slice(4,6)}-${date.slice(6,8)}T${startTime.slice(0,2)}:${startTime.slice(2,4)}Z`)
+            const endDate = new Date(`${date.slice(0,4)}-${date.slice(4,6)}-${date.slice(6,8)}T${endTime.slice(0,2)}:${endTime.slice(2,4)}Z`)
+            const seat = `${itinerary.data.itinerary_notice.psr.coach_name}车${itinerary.data.itinerary_notice.psr.seat_name}`
+            const platform = itinerary.data.platform
+
+            // Convert to UTC
+            startDate.setTime(startDate.getTime() - 8*60*60*1000)
+            endDate.setTime(endDate.getTime() - 8*60*60*1000)
+
+            const startDateString = startDate.toISOString().replace(/[:\-]|(\.000)/g, '')
+            const endDateString = endDate.toISOString().replace(/[:\-]|(\.000)/g, '')
 
             const button = document.createElement('a')
-            button.className = 'txt-primary'
-            button.style = 'display: inline-block'
-            button.href = `javascript: addToGoogleCalendar("${fromStationTelecode}", "${toStationTelecode}", "${train}", "${date}", "${seat}")`
+            button.className = 'btn add_to_calendar'
+            button.target = '_blank'
+            button.href = encodeURI(`https://www.google.com/calendar/render?action=TEMPLATE&text=乘坐 ${train} 从${fromStation}到${toStation}&location=${fromStation}火车站 ${platform} 检票口&dates=${startDateString}/${endDateString}&details=座位：${seat}`)
             button.appendChild(document.createTextNode('添加到 Google 日历'))
-            el.appendChild(button)
+            el.querySelector('.btn-right').prepend(button)
         })
-    }
-
-    function isTimeWrapped(a, b) {
-        return a.startsWith('2') && b.startsWith('0')
-    }
-
-    function normalizeDate(d) {
-        return d.replace(/(\-)|(:)|(.000)/g, '')
-    }
-
-    window.addToGoogleCalendar = async (fromStationTelecode, toStationTelecode, train, date, seat) => {
-        const timetableUrl = `https://kyfw.12306.cn/otn/czxx/queryByTrainNo?train_no=${train}&from_station_telecode=${fromStationTelecode}&to_station_telecode=${toStationTelecode}&depart_date=${date}`
-        const resp = await fetch(timetableUrl)
-        const info = await resp.json()
-
-        let origin, dest, prev
-        let daysWrapped = 0
-        for (let s of info.data.data) {
-            if (origin) {
-                if (prev && isTimeWrapped(prev.start_time, s.arrive_time)) {
-                    daysWrapped++
-                } else if (isTimeWrapped(s.arrive_time, s.start_time)) {
-                    daysWrapped++
-                }
-            }
-            if (!origin && s.isEnabled) {
-                origin = s
-            } else if (origin && !s.isEnabled) {
-                dest = prev
-                break
-            }
-            prev = s
-        }
-        if (!dest) {
-            dest = prev
-        }
-
-        const eventSummary = `${info.data.data[0].station_train_code}: ${origin.station_name} - ${dest.station_name} @ ${seat}`
-        const eventLocation = `${origin.station_name}火车站`
-        const eventBeginTime = normalizeDate((new Date(`${date} ${origin.start_time}`)).toISOString())
-        const eventEndTimeDate = new Date(`${date} ${dest.arrive_time}`)
-        eventEndTimeDate.setDate(eventEndTimeDate.getDate() + daysWrapped)
-        const eventEndTime = normalizeDate(eventEndTimeDate.toISOString())
-
-        const eventUrl = encodeURI(`https://www.google.com/calendar/render?action=TEMPLATE&text=${eventSummary}&location=${eventLocation}&dates=${eventBeginTime}/${eventEndTime}`)
-        window.open(eventUrl,'_blank')
     }
 
     const xhrOpen = XMLHttpRequest.prototype.open
